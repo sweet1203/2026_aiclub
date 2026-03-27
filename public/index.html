@@ -113,6 +113,31 @@
     }
     .header-info h1 { font-size: 16px; font-weight: 700; }
     .header-info p  { font-size: 12px; color: var(--muted); }
+    .header-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .usage-stats {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: right;
+      line-height: 1.45;
+      max-width: 220px;
+    }
+    .usage-stats strong { color: var(--accent2); font-weight: 500; }
+    .usage-reset {
+      font-size: 10px;
+      color: var(--muted);
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      margin-top: 2px;
+      display: inline-block;
+    }
+    .usage-reset:hover { color: var(--text); }
     .status-dot {
       width: 8px; height: 8px;
       background: #4ade80;
@@ -281,7 +306,13 @@
     <h1>AI 코딩 도우미</h1>
     <p>웹앱 개발 전문 AI · 코드 작성 · 에러 해결 · 아이디어 제안</p>
   </div>
-  <div class="status-dot"></div>
+  <div class="header-right">
+    <div class="usage-stats" id="usageStats" title="이 브라우저(기기)에서만 누적됩니다. 다른 사람·다른 기기와는 합산되지 않아요.">
+      <div id="usageLines">사용량 집계 중…</div>
+      <span class="usage-reset" id="usageReset" role="button" tabindex="0">누적 기록 지우기</span>
+    </div>
+    <div class="status-dot"></div>
+  </div>
 </header>
 
 <div id="chatArea">
@@ -313,6 +344,65 @@
   // ── 설정 ─────────────────────────────────────────────
   const ACCESS_PASSWORD = 'coding2026';   // ← 비밀번호 여기서 변경!
   const SESSION_KEY = 'ai_helper_auth';
+  const USAGE_KEY = 'ai_helper_usage_v1';
+  /** Haiku 4.5 공식 요금(참고): 입력 $1/M·출력 $5/M 토큰 — 다른 모델이면 실제 비용과 다를 수 있어요 */
+  const USD_IN_PER_M = 1;
+  const USD_OUT_PER_M = 5;
+
+  function loadUsage() {
+    try {
+      const raw = localStorage.getItem(USAGE_KEY);
+      if (!raw) return { in: 0, out: 0, n: 0 };
+      const o = JSON.parse(raw);
+      return {
+        in: Math.max(0, Number(o.in) || 0),
+        out: Math.max(0, Number(o.out) || 0),
+        n: Math.max(0, Number(o.n) || 0),
+      };
+    } catch {
+      return { in: 0, out: 0, n: 0 };
+    }
+  }
+
+  function saveUsage(u) {
+    localStorage.setItem(USAGE_KEY, JSON.stringify(u));
+  }
+
+  function bumpUsage(usage) {
+    if (!usage) return;
+    const a = loadUsage();
+    a.in += Number(usage.input_tokens) || 0;
+    a.out += Number(usage.output_tokens) || 0;
+    a.n += 1;
+    saveUsage(a);
+  }
+
+  function fmtUsd(inTok, outTok) {
+    const usd = (inTok * USD_IN_PER_M + outTok * USD_OUT_PER_M) / 1e6;
+    if (usd < 0.00005) return '≈ $0.00';
+    return `≈ $${usd < 0.01 ? usd.toFixed(4) : usd.toFixed(2)}`;
+  }
+
+  function renderUsage() {
+    const el = document.getElementById('usageLines');
+    if (!el) return;
+    const { in: tin, out: tout, n } = loadUsage();
+    const sum = tin + tout;
+    if (n === 0 && sum === 0) {
+      el.innerHTML = '아직 질문 전이에요.<br><span style="opacity:.85">응답 후 토큰·참고 비용이 쌓여요.</span>';
+      return;
+    }
+    el.innerHTML =
+      `누적 <strong>${n}</strong>회 · 입력 <strong>${tin.toLocaleString()}</strong> / 출력 <strong>${tout.toLocaleString()}</strong> 토큰` +
+      `<br>참고 비용(Haiku 4.5 기준) <strong>${fmtUsd(tin, tout)}</strong>`;
+  }
+
+  document.getElementById('usageReset')?.addEventListener('click', () => {
+    if (!confirm('이 브라우저에 저장된 사용량 누적을 지울까요?')) return;
+    localStorage.removeItem(USAGE_KEY);
+    renderUsage();
+  });
+  renderUsage();
 
   // ── 로그인 ───────────────────────────────────────────
   function tryLogin() {
@@ -417,6 +507,10 @@
       const reply = data.reply || data.error || '오류가 발생했어요. 다시 시도해 주세요.';
       appendMsg('ai', reply);
       history.push({ role: 'assistant', content: reply });
+      if (res.ok && data.usage) {
+        bumpUsage(data.usage);
+        renderUsage();
+      }
     } catch {
       hideTyping();
       appendMsg('ai', '서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.');

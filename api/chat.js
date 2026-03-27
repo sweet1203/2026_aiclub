@@ -123,7 +123,16 @@ export default async function handler(req, res) {
           ? block.text
           : '응답을 받지 못했어요.';
 
-    return res.status(200).json({ reply });
+    const u = data.usage;
+    const usage =
+      u && typeof u === 'object'
+        ? {
+            input_tokens: Number(u.input_tokens) || 0,
+            output_tokens: Number(u.output_tokens) || 0,
+          }
+        : undefined;
+
+    return res.status(200).json({ reply, usage });
   } catch (error) {
     console.error('Server error:', error);
     return res.status(500).json({ error: '서버 오류가 발생했어요. 잠시 후 다시 시도해 주세요.' });
